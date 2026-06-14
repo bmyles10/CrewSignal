@@ -1,19 +1,24 @@
 """
 NOTES:
-1. Fast Response: Webhooks should always return a 2xx status code immediately so the sending CRM doesn't timeout. We use status_code=202 (Accepted).
-2. Dependency Injection: We inject `session: Session = Depends(get_session)` so FastAPI handles the database connection lifecycle safely.
-3. Background Tasks: We inject FastAPI's BackgroundTasks. This lets us fire the SMS adapter completely asynchronously AFTER the 202 response is sent, preventing network latency from blocking the API thread.
-4. Basic Payload: We are using a temporary basic Pydantic model here. We will enforce strict sanitization in Task 11.
+1. This endpoint acts like a receptionist. When a job-completion event arrives, it
+   writes it down and immediately says "got it, thanks!" — it doesn't make the CRM
+   wait around while a text message is being sent. The actual texting happens later
+   in the background worker.
+2. We figure out which roofing company sent the request from their API key, not from
+   anything inside the payload. The payload could be faked — the key can be checked
+   against the database.
+3. Before saving anything, we check if we've already seen this exact job ID from this
+   company. CRMs often send the same event multiple times when they don't get an
+   instant reply, so without this check the customer would get spammed with texts.
 """
 
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.api.deps import get_current_tenant
 from app.core.db import get_session
 from app.models.db_models import ClientCampaign, Tenant
-from app.adapters.sms_mock import MockSMSAdapter
 
 router = APIRouter()
 
@@ -28,15 +33,13 @@ class BasicJobberPayload(BaseModel):
 @router.post("/job-completed", status_code=202)
 async def process_job_completed(
     payload: BasicJobberPayload,
-    background_tasks: BackgroundTasks,
     tenant: Tenant = Depends(get_current_tenant),
     session: Session = Depends(get_session),
 ):
     """
-    Receives the job completion signal from the field CRM, logs it to the database,
-    and dispatches the review text in the background.
+    Writes the job event to the tracking ledger as 'pending' and returns 202
+    immediately. The durable worker in app/worker.py handles SMS dispatch.
     """
-    # Idempotency: return 202 immediately if this event was already processed
     existing = session.exec(
         select(ClientCampaign).where(
             ClientCampaign.tenant_id == tenant.id,
@@ -65,17 +68,8 @@ async def process_job_completed(
     session.commit()
     session.refresh(new_campaign)
 
-    sms_adapter = MockSMSAdapter()
-
-    background_tasks.add_task(
-        sms_adapter.send_review_request,
-        phone=payload.customer_phone,
-        customer_name=payload.customer_name,
-        review_url=tenant.review_url,
-    )
-
     return {
         "status": "accepted",
-        "message": "Job completion logged and SMS dispatched.",
+        "message": "Job completion logged. SMS queued for dispatch.",
         "campaign_id": new_campaign.id,
     }

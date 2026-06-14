@@ -1,8 +1,17 @@
 """
 NOTES:
-1. SQLModel Relationship Mapping: We are utilizing SQLModel's native Relationship attribute. This allows us to lazily load a tenant's historical dispatches instantly without writing manual SQL JOIN queries.
-2. Indexing Strategy: Indexes are explicitly added to `api_key` on the Tenant model and `job_id` on the ClientCampaign model. This guarantees sub-millisecond lookup speeds when the webhook gate processes high-volume incoming payloads.
-3. UUID/String Primary Keys: Primary keys are typed as strings but default to standard UUID generation to prevent malicious sequential enumeration scanning of our database endpoints.
+1. These are the blueprints for what gets saved in the database. Tenant is a roofing
+   company (our paying customer). ClientCampaign is one job-completion event that is
+   waiting for a review text to be sent. OptOut is a list of phone numbers that have
+   asked not to receive any more texts.
+2. IDs are long random strings (UUIDs) instead of counting numbers (1, 2, 3...). This
+   stops anyone from guessing "what's record number 4?" and snooping on other tenants.
+3. The index=True fields are like the tabs on a filing cabinet — they let the database
+   jump straight to the right row instead of reading every single row from top to bottom.
+4. The Relationship between Tenant and ClientCampaign lets us ask "show me all jobs for
+   this roofing company" without writing any extra database code.
+5. Each OptOut row is scoped to a tenant so one company's opt-outs don't affect another
+   company's messages to the same phone number.
 """
 
 from datetime import datetime, timezone
@@ -55,7 +64,7 @@ class ClientCampaign(SQLModel, table=True):
     job_id: str = Field(index=True)
     
     # Automated Dispatch State Tracker
-    delivery_status: str = Field(default="pending")  # pending, sent, failed, duplicate
+    delivery_status: str = Field(default="pending")  # pending, sent, failed, duplicate, suppressed
     retry_count: int = Field(default=0)
     
     # Timestamps
@@ -64,3 +73,19 @@ class ClientCampaign(SQLModel, table=True):
 
     # Link back up to the Parent Tenant profile
     tenant: Optional[Tenant] = Relationship(back_populates="campaigns")
+
+
+class OptOut(SQLModel, table=True):
+    """
+    Suppression list. Any phone number in this table will never receive an SMS
+    from the matching tenant, regardless of how many jobs are completed.
+    """
+    __tablename__: str = "opt_outs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "phone", name="uq_optout_tenant_phone"),
+    )
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True, index=True)
+    tenant_id: str = Field(foreign_key="tenants.id", index=True)
+    phone: str = Field(index=True)
+    created_at: datetime = Field(default_factory=get_utc_now)

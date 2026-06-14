@@ -1,8 +1,16 @@
 """
 NOTES:
-1. In-Memory Isolation: We spin up a completely fresh, isolated in-memory SQLite database (`sqlite://`) for tests. It vanishes the second the test finishes, keeping your real `crewsignal.db` pristine.
-2. Dependency Override: We use `app.dependency_overrides` to force the FastAPI router to use our test database session instead of the live production database.
-3. AsyncClient Setup: We configure `httpx.AsyncClient` as a fixture so we can simulate real asynchronous network requests against our local endpoints without needing the Uvicorn server running.
+1. Each test gets its own empty database that only exists while that test is running.
+   When the test finishes, the database is completely deleted — so tests can never mess
+   each other up by leaving leftover data behind.
+2. We trick FastAPI into using the test database instead of the real one by swapping
+   out the get_session function. The app thinks it's talking to production but it's
+   actually using our throwaway test database.
+3. The httpx client lets us send fake HTTP requests directly to the app without
+   starting a real web server — tests run fast and nothing hits the network.
+4. test_tenant creates a fake roofing company in the test database before each test so
+   the API key check has something real to look up. Any test that calls the webhook
+   needs this.
 """
 
 import pytest

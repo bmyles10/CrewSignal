@@ -1,7 +1,10 @@
 """
 NOTES:
-1. Simulated Latency: We use asyncio.sleep(1) to simulate the time it takes to handshake with a real telecommunications carrier. This ensures our local testing accurately reflects production timing.
-2. Formatted Output: The print statement uses a clean, multiline f-string to output a highly visible receipt directly into your PowerShell terminal so you can verify the exact phrasing the customer will see.
+1. This is a pretend SMS sender for local development. Instead of actually texting
+   anyone and costing money, it just prints the message to your terminal so you can
+   read exactly what the customer would receive.
+2. The asyncio.sleep(1) fakes the small delay a real network call would take. This
+   makes local testing feel like it behaves the same as production.
 """
 
 import asyncio
@@ -20,7 +23,8 @@ class MockSMSAdapter(BaseSMSAdapter):
         # Format the exact message the customer would receive
         message_body = (
             f"Hi {customer_name}, thanks for choosing us! "
-            f"If you have a minute, we'd love a quick review of our work: {review_url}"
+            f"If you have a minute, we'd love a quick review of our work: {review_url} "
+            f"Reply STOP to opt out."
         )
         
         # Print the visual receipt to the terminal

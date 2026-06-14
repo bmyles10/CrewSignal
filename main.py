@@ -1,27 +1,39 @@
 """
 NOTES:
-1. Uvicorn Reload: The reload=True flag inside the execution loop means you can leave this terminal running.
-2. CORS Middleware: Currently configured permissively for local testing.
-3. Async Lifespan: We use FastAPI's @asynccontextmanager to ensure `create_db_and_tables()` runs before the server accepts any traffic.
-4. Router Integration: Injected the v1 webhooks router to expose our /job-completed endpoint.
+1. This is the front door of the whole app. It starts the web server, makes sure the
+   database tables exist, and kicks off the background worker that sends text messages.
+2. The lifespan block is like an opening and closing routine for a shop — setup code
+   runs before the server lets anyone in, and cleanup code runs when it shuts down.
+3. The background worker starts at the same time as the web server and quietly checks
+   for pending texts every 10 seconds without getting in the way of incoming requests.
+4. CORS is set to allow requests from anywhere right now so local testing is easy.
+   Before going live, change allow_origins to only the CRM's domain so random websites
+   can't poke the API.
+5. reload=True means Uvicorn watches your files and restarts automatically when you
+   save a change — no need to stop and rerun the server during development.
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.db import create_db_and_tables
+from app.worker import worker_loop
 
-# Import the new webhooks router
-from app.api.v1 import webhooks
+from app.api.v1 import optout, webhooks
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Boot sequence: Build the database tables before taking requests
     print(" [SYSTEM] Initializing Database Ledgers...")
     create_db_and_tables()
+    worker_task = asyncio.create_task(worker_loop())
     yield
-    # Shutdown sequence goes here if needed later
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -38,8 +50,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Wire up the new endpoints
 app.include_router(webhooks.router, prefix=f"{settings.API_V1_STR}/webhooks", tags=["Webhooks"])
+app.include_router(optout.router, prefix=f"{settings.API_V1_STR}", tags=["Opt-Out"])
 
 @app.get("/health", tags=["Health"])
 async def health_check():

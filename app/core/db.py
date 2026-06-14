@@ -1,7 +1,14 @@
 """
 NOTES:
-1. Thread Safety: SQLite strictly enforces single-thread access by default. We pass `check_same_thread=False` to the connection arguments so FastAPI's async webhook workers can share the connection pool without crashing under high load.
-2. Lifespan Bootstrapping: The `create_db_and_tables` function will be called directly by main.py when the server boots to ensure our tracking ledger always exists before the first client payload hits the gateway.
+1. The database is like a shared notebook that many people write in at the same time.
+   check_same_thread=False tells SQLite it's OK for multiple workers to use the same
+   connection, so requests don't crash into each other.
+2. WAL mode is like giving everyone their own scratch pad first, then copying it to the
+   main notebook when they're done. This means readers and writers don't block each
+   other, making the database much faster under load.
+3. create_db_and_tables() runs once when the server starts to make sure all the tables
+   already exist before any requests come in — like setting up the filing cabinet before
+   opening for business.
 """
 
 from sqlmodel import SQLModel, create_engine, Session

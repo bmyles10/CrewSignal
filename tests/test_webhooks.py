@@ -1,3 +1,18 @@
+"""
+NOTES:
+1. Every test that calls the webhook must send a real API key in the headers, just like
+   a real CRM would. The test_tenant fixture puts a fake roofing company in the database
+   so the key check has something to find.
+2. Tests check what actually landed in the database, not just whether the response said
+   "202 OK". A 202 that didn't save any data is still a bug — checking the row catches
+   that.
+3. The duplicate test fires the exact same payload twice and then confirms only one row
+   was created. This proves that if a CRM retries a webhook, the customer won't get
+   two texts.
+4. These tests don't check anything about SMS sending — the webhook only creates a
+   "pending" row now. The SMS part is tested in test_worker.py.
+"""
+
 import pytest
 from httpx import AsyncClient
 from sqlmodel import Session, select

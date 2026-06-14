@@ -1,10 +1,9 @@
 """
 Tests for TwilioSMSAdapter.
 
-Rules enforced here:
-- The Twilio Client is patched at the class level (app.adapters.sms_twilio.Client)
-  so no real network calls are ever made.
-- time.sleep is patched to keep retries instant — tenacity calls it between attempts.
+We swap out the real Twilio Client with a fake one so no actual texts are ever sent
+and no money is spent. We also freeze time.sleep so the retry waits happen instantly
+instead of making the test suite take several minutes.
 """
 
 import pytest
@@ -37,7 +36,8 @@ async def test_successful_send():
     assert result is True
     mock_create.assert_called_once_with(
         body=f"Hi {_NAME}, thanks for choosing us! "
-             f"If you have a minute, we'd love a quick review of our work: {_URL}",
+             f"If you have a minute, we'd love a quick review of our work: {_URL} "
+             f"Reply STOP to opt out.",
         from_="+12345678900",  # TWILIO_FROM_NUMBER default in config
         to=_PHONE,
     )

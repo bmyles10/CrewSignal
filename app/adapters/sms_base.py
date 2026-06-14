@@ -1,7 +1,11 @@
 """
 NOTES:
-1. Abstract Base Classes (ABC): By inheriting from ABC and using @abstractmethod, we mathematically guarantee that any future adapter (like Twilio, Plivo, or AWS SNS) MUST implement `send_review_request` with the exact same arguments, or the server will crash on boot.
-2. Async Signatures: We force the signature to be asynchronous so network calls never block the main FastAPI thread.
+1. This file is a job description, not actual code. It says "any SMS sender we ever
+   build must have a method called send_review_request that takes these exact inputs
+   and returns True or False". If someone builds a new sender and forgets that method,
+   Python will refuse to run it at all.
+2. The method is async so the rest of the app doesn't have to sit and wait while a
+   text message is being sent out — it can keep handling other requests in the meantime.
 """
 
 from abc import ABC, abstractmethod
