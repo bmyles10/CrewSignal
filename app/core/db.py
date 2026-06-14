@@ -5,6 +5,7 @@ NOTES:
 """
 
 from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy import event
 from app.core.config import settings
 import os
 
@@ -18,10 +19,16 @@ sqlite_url = f"sqlite:///{DATABASE_DIR}/crewsignal.db"
 # The Engine is the core connection pool to the database
 # check_same_thread=False is REQUIRED for FastAPI + SQLite concurrency
 engine = create_engine(
-    sqlite_url, 
+    sqlite_url,
     echo=False, # Set to True if you want to see raw SQL queries in the terminal
     connect_args={"check_same_thread": False}
 )
+
+@event.listens_for(engine, "connect")
+def set_sqlite_wal_mode(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.close()
 
 def create_db_and_tables():
     """Reads all SQLModel classes and generates the physical tables in the database."""

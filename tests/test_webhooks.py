@@ -42,3 +42,28 @@ async def test_job_completed_webhook_creates_campaign(client: AsyncClient, sessi
     assert db_record is not None
     assert db_record.customer_name == "Test User"
     assert db_record.delivery_status == "pending"
+
+
+async def test_duplicate_webhook_returns_202_without_double_insert(client: AsyncClient, session: Session):
+    """
+    Sending the same job_id twice must return 202 with status 'duplicate' and
+    must not create a second ClientCampaign row.
+    """
+    payload = {
+        "job_id": "JOB-DUPE",
+        "customer_name": "Dupe User",
+        "customer_phone": "+15559876543",
+        "tenant_id": "TENANT-123"
+    }
+
+    first = await client.post("/api/v1/webhooks/job-completed", json=payload)
+    assert first.status_code == 202
+    assert first.json()["status"] == "accepted"
+
+    second = await client.post("/api/v1/webhooks/job-completed", json=payload)
+    assert second.status_code == 202
+    assert second.json()["status"] == "duplicate"
+
+    statement = select(ClientCampaign).where(ClientCampaign.job_id == "JOB-DUPE")
+    rows = session.exec(statement).all()
+    assert len(rows) == 1

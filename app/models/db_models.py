@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import List, Optional
 import uuid
 from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import UniqueConstraint
 
 def get_utc_now() -> datetime:
     """Helper to ensure all database entries use a standardized timezone-aware UTC format."""
@@ -34,19 +35,23 @@ class Tenant(SQLModel, table=True):
 
 class ClientCampaign(SQLModel, table=True):
     """
-    The transactional core log. Tracks individual job notifications, 
+    The transactional core log. Tracks individual job notifications,
     customer contacts, and dispatch delivery states.
     """
     __tablename__: str = "client_campaigns"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "provider", "job_id", name="uq_campaign_dedup"),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True, index=True)
     tenant_id: str = Field(foreign_key="tenants.id", index=True)
-    
+
     # Customer Details
     customer_name: str
     customer_phone: str = Field(index=True)
-    
+
     # External CRM Identifiers (e.g., Jobber's internal Job ID number)
+    provider: str = Field(default="jobber", index=True)
     job_id: str = Field(index=True)
     
     # Automated Dispatch State Tracker

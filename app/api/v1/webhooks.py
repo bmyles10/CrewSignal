@@ -7,7 +7,7 @@ NOTES:
 """
 
 from fastapi import APIRouter, Depends, BackgroundTasks
-from sqlmodel import Session
+from sqlmodel import Session, select
 from pydantic import BaseModel
 
 from app.core.db import get_session
@@ -33,25 +33,42 @@ async def process_job_completed(
     Receives the job completion signal from the field CRM, logs it to the database,
     and dispatches the review text in the background.
     """
+    # Idempotency: return 202 immediately if this event was already processed
+    existing = session.exec(
+        select(ClientCampaign).where(
+            ClientCampaign.tenant_id == payload.tenant_id,
+            ClientCampaign.provider == "jobber",
+            ClientCampaign.job_id == payload.job_id,
+        )
+    ).first()
+
+    if existing:
+        return {
+            "status": "duplicate",
+            "message": "Event already processed.",
+            "campaign_id": existing.id,
+        }
+
     # Create a new campaign entry in our tracking database
     new_campaign = ClientCampaign(
         tenant_id=payload.tenant_id,
         customer_name=payload.customer_name,
         customer_phone=payload.customer_phone,
+        provider="jobber",
         job_id=payload.job_id,
         delivery_status="pending"
     )
-    
+
     session.add(new_campaign)
     session.commit()
     session.refresh(new_campaign)
-    
+
     # Instantiate the local development mock adapter
     sms_adapter = MockSMSAdapter()
-    
+
     # Generate a dummy review URL for testing (we will query the real one from the DB later)
     dummy_review_url = f"https://crewsignal.com/reviews/{payload.tenant_id}"
-    
+
     # Fire the text message into the background queue so the API responds instantly
     background_tasks.add_task(
         sms_adapter.send_review_request,
@@ -59,9 +76,9 @@ async def process_job_completed(
         customer_name=payload.customer_name,
         review_url=dummy_review_url
     )
-    
+
     return {
-        "status": "accepted", 
+        "status": "accepted",
         "message": "Job completion logged and SMS dispatched.",
-        "campaign_id": new_campaign.id
+        "campaign_id": new_campaign.id,
     }
