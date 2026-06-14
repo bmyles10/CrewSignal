@@ -1,0 +1,167 @@
+"""
+NOTES:
+1. This is a one-shot live test script — it sends a real webhook to a running server,
+   waits for the worker to dispatch a real Twilio SMS, then checks the database to
+   confirm the text was actually sent. Only run this with real Twilio credentials.
+2. The script checks USE_MOCK_SMS at startup and refuses to run if it's still True.
+   This prevents accidentally "testing" against the mock adapter and thinking the
+   real Twilio path works when it hasn't been exercised at all.
+3. A unique job_id is generated every run so the idempotency check never blocks the
+   test from creating a fresh campaign row.
+4. Run this from the project root with the server already running in another terminal:
+     Terminal 1:  .venv\\Scripts\\python.exe main.py
+     Terminal 2:  .venv\\Scripts\\python.exe sandbox_test.py --api-key KEY --phone +1... --name "Your Name"
+"""
+
+import argparse
+import sys
+import time
+import uuid
+
+import httpx
+from sqlmodel import Session, select
+
+from app.core.config import settings
+from app.core.db import engine
+from app.models.db_models import ClientCampaign
+
+SERVER_URL   = "http://localhost:8000"
+WEBHOOK_PATH = "/api/v1/webhooks/job-completed"
+WAIT_SECONDS = 15
+
+
+def _divider(char: str = "=", width: int = 62) -> None:
+    print(char * width)
+
+
+def _abort(message: str) -> None:
+    print(f"\n ABORT: {message}\n")
+    sys.exit(1)
+
+
+def run_test(api_key: str, phone: str, customer_name: str) -> None:
+
+    # ── preflight: confirm we are NOT in mock mode ────────────────────────────
+    if settings.USE_MOCK_SMS:
+        _abort(
+            "USE_MOCK_SMS is True — the worker will use MockSMSAdapter, not Twilio.\n"
+            "        Add USE_MOCK_SMS=False to your .env file, then restart the server."
+        )
+
+    job_id = f"SANDBOX-{uuid.uuid4().hex[:8].upper()}"
+
+    _divider()
+    print(" CREWSIGNAL LIVE SANDBOX TEST")
+    _divider()
+    print(f" Adapter     : TwilioSMSAdapter  (USE_MOCK_SMS=False confirmed)")
+    print(f" Server      : {SERVER_URL}")
+    print(f" Job ID      : {job_id}")
+    print(f" Phone       : {phone}")
+    print(f" Customer    : {customer_name}")
+    _divider()
+    print()
+
+    # ── step 1: POST the webhook ──────────────────────────────────────────────
+    print("[1/3] Sending webhook...")
+
+    payload = {
+        "job_id":          job_id,
+        "customer_name":   customer_name,
+        "customer_phone":  phone,
+    }
+
+    try:
+        response = httpx.post(
+            f"{SERVER_URL}{WEBHOOK_PATH}",
+            json=payload,
+            headers={"X-Api-Key": api_key},
+            timeout=10.0,
+        )
+    except httpx.ConnectError:
+        _abort(
+            f"Could not reach {SERVER_URL}. Is the server running?\n"
+             "        Start it with:  .venv\\Scripts\\python.exe main.py"
+        )
+
+    if response.status_code == 401:
+        _abort("Server returned 401 — the API key is wrong or the tenant is inactive.")
+
+    if response.status_code != 202:
+        _abort(
+            f"Unexpected response: HTTP {response.status_code}\n"
+            f"        Body: {response.text}"
+        )
+
+    campaign_id = response.json()["campaign_id"]
+    print(f"      OK — 202 Accepted")
+    print(f"      campaign_id: {campaign_id}")
+
+    # ── step 2: wait for the worker to pick up the pending row ────────────────
+    print(f"\n[2/3] Waiting {WAIT_SECONDS}s for the worker to dispatch the SMS...")
+    for remaining in range(WAIT_SECONDS, 0, -1):
+        print(f"      {remaining:2d}s remaining...", end="\r", flush=True)
+        time.sleep(1)
+    print(f"      Done waiting.              ")
+
+    # ── step 3: query the database directly ───────────────────────────────────
+    print("\n[3/3] Querying database for delivery_status...")
+
+    with Session(engine) as session:
+        campaign = session.exec(
+            select(ClientCampaign).where(ClientCampaign.id == campaign_id)
+        ).first()
+
+    if not campaign:
+        _abort("Campaign row not found in the database — something went very wrong.")
+
+    status = campaign.delivery_status
+    passed = status == "sent"
+
+    print()
+    _divider()
+    if passed:
+        print(f" PASS  delivery_status = '{status}'")
+        print(f"       Check your phone ({phone}) — the text should have arrived.")
+    else:
+        print(f" FAIL  delivery_status = '{status}'  (expected 'sent')")
+        print(f"       Check the server terminal for error messages.")
+    print()
+    print(f" retry_count : {campaign.retry_count}")
+    print(f" updated_at  : {campaign.updated_at}")
+    print(f" campaign_id : {campaign.id}")
+    _divider()
+    print()
+
+    sys.exit(0 if passed else 1)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        prog="sandbox_test.py",
+        description="Live end-to-end Twilio sandbox test for CrewSignal",
+    )
+    parser.add_argument(
+        "--api-key",
+        required=True,
+        metavar="KEY",
+        help="Tenant API key generated by:  manage.py provision",
+    )
+    parser.add_argument(
+        "--phone",
+        required=True,
+        metavar="PHONE",
+        help="Phone number to receive the test SMS (E.164 format, e.g. +15551234567)",
+    )
+    parser.add_argument(
+        "--name",
+        default="Sandbox Customer",
+        metavar="NAME",
+        help='Customer name used in the message body (default: "Sandbox Customer")',
+    )
+
+    args = parser.parse_args()
+    run_test(args.api_key, args.phone, args.name)
+
+
+if __name__ == "__main__":
+    main()
