@@ -14,6 +14,7 @@ from sqlmodel.pool import StaticPool
 # Import your FastAPI app and database dependency
 from main import app
 from app.core.db import get_session
+from app.models.db_models import Tenant
 
 # 1. Create a lightning-fast in-memory database for testing
 sqlite_url = "sqlite://"
@@ -44,3 +45,17 @@ async def client_fixture(session: Session):
         yield client
 
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(name="test_tenant")
+def test_tenant_fixture(session: Session) -> Tenant:
+    """Inserts a reusable Tenant row for auth tests."""
+    tenant = Tenant(
+        business_name="Test Roofing Co",
+        api_key="test-api-key-abc123",
+        review_url="https://g.page/test-roofing/review",
+    )
+    session.add(tenant)
+    session.commit()
+    session.refresh(tenant)
+    return tenant

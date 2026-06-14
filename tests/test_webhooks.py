@@ -1,69 +1,83 @@
-"""
-NOTES:
-1. Async Execution: We use @pytest.mark.asyncio because our FastAPI app and httpx client are fully asynchronous.
-2. Tag Standardization: Applied standard @pytest.mark.new_test for suite filtering.
-3. E2E Verification: We don't just check the 202 status code; we actually query the test database session to physically prove the row was inserted correctly.
-"""
-
 import pytest
 from httpx import AsyncClient
 from sqlmodel import Session, select
-from app.models.db_models import ClientCampaign
+from app.models.db_models import ClientCampaign, Tenant
 
-# Standardize tags for the entire file
 pytestmark = [pytest.mark.asyncio, pytest.mark.new_test]
 
-async def test_job_completed_webhook_creates_campaign(client: AsyncClient, session: Session):
-    """
-    Test that a valid CRM webhook payload successfully logs a new campaign
-    in the tracking ledger and returns a 202 Accepted status.
-    """
-    # 1. Define the test payload (Simulating Jobber CRM)
+
+async def test_job_completed_webhook_creates_campaign(
+    client: AsyncClient, session: Session, test_tenant: Tenant
+):
+    """Valid API key + payload creates one campaign row and returns 202 accepted."""
     payload = {
         "job_id": "JOB-9999",
         "customer_name": "Test User",
         "customer_phone": "+15551234567",
-        "tenant_id": "TENANT-123"
     }
-    
-    # 2. Fire the simulated webhook at the gateway
-    response = await client.post("/api/v1/webhooks/job-completed", json=payload)
-    
-    # 3. Assert the API responded correctly
+
+    response = await client.post(
+        "/api/v1/webhooks/job-completed",
+        json=payload,
+        headers={"X-Api-Key": test_tenant.api_key},
+    )
+
     assert response.status_code == 202
     data = response.json()
     assert data["status"] == "accepted"
     assert "campaign_id" in data
-    
-    # 4. Assert the database physically saved the record inside the isolated test session
-    statement = select(ClientCampaign).where(ClientCampaign.job_id == "JOB-9999")
-    db_record = session.exec(statement).first()
-    
+
+    db_record = session.exec(
+        select(ClientCampaign).where(ClientCampaign.job_id == "JOB-9999")
+    ).first()
     assert db_record is not None
+    assert db_record.tenant_id == test_tenant.id
     assert db_record.customer_name == "Test User"
     assert db_record.delivery_status == "pending"
 
 
-async def test_duplicate_webhook_returns_202_without_double_insert(client: AsyncClient, session: Session):
-    """
-    Sending the same job_id twice must return 202 with status 'duplicate' and
-    must not create a second ClientCampaign row.
-    """
+async def test_duplicate_webhook_returns_202_without_double_insert(
+    client: AsyncClient, session: Session, test_tenant: Tenant
+):
+    """Sending the same job_id twice returns 202 duplicate and creates only one row."""
     payload = {
         "job_id": "JOB-DUPE",
         "customer_name": "Dupe User",
         "customer_phone": "+15559876543",
-        "tenant_id": "TENANT-123"
     }
+    headers = {"X-Api-Key": test_tenant.api_key}
 
-    first = await client.post("/api/v1/webhooks/job-completed", json=payload)
+    first = await client.post("/api/v1/webhooks/job-completed", json=payload, headers=headers)
     assert first.status_code == 202
     assert first.json()["status"] == "accepted"
 
-    second = await client.post("/api/v1/webhooks/job-completed", json=payload)
+    second = await client.post("/api/v1/webhooks/job-completed", json=payload, headers=headers)
     assert second.status_code == 202
     assert second.json()["status"] == "duplicate"
 
-    statement = select(ClientCampaign).where(ClientCampaign.job_id == "JOB-DUPE")
-    rows = session.exec(statement).all()
+    rows = session.exec(
+        select(ClientCampaign).where(ClientCampaign.job_id == "JOB-DUPE")
+    ).all()
     assert len(rows) == 1
+
+
+async def test_missing_api_key_returns_401(client: AsyncClient, test_tenant: Tenant):
+    """Request without X-Api-Key header must be rejected with 401."""
+    payload = {"job_id": "JOB-NOAUTH", "customer_name": "No Auth", "customer_phone": "+15550000000"}
+
+    response = await client.post("/api/v1/webhooks/job-completed", json=payload)
+
+    assert response.status_code == 401
+
+
+async def test_invalid_api_key_returns_401(client: AsyncClient, test_tenant: Tenant):
+    """Request with a wrong API key must be rejected with 401."""
+    payload = {"job_id": "JOB-BADKEY", "customer_name": "Bad Key", "customer_phone": "+15550000001"}
+
+    response = await client.post(
+        "/api/v1/webhooks/job-completed",
+        json=payload,
+        headers={"X-Api-Key": "not-a-real-key"},
+    )
+
+    assert response.status_code == 401
