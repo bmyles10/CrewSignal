@@ -12,6 +12,7 @@ pydantic[email]==2.8.2
 
 # Third-Party Integrations
 twilio==9.1.0
+tenacity==8.5.0
 
 # Testing & Dev Utility
 pytest==8.3.2
