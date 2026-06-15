@@ -105,8 +105,13 @@ async def test_non_opted_out_number_still_sends(
     session.refresh(campaign)
     assert campaign.delivery_status == "sent"
     assert campaign.retry_count == 1
+
+    expected_body = test_tenant.message_template.format(
+        customer_name=campaign.customer_name,
+        business_name=test_tenant.business_name,
+        review_url=test_tenant.review_url,
+    )
     adapter.send_review_request.assert_called_once_with(
         phone=phone,
-        customer_name=campaign.customer_name,
-        review_url=test_tenant.review_url,
+        message_body=expected_body,
     )

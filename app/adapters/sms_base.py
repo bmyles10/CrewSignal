@@ -16,9 +16,10 @@ class BaseSMSAdapter(ABC):
     """
     
     @abstractmethod
-    async def send_review_request(self, phone: str, customer_name: str, review_url: str) -> bool:
+    async def send_review_request(self, phone: str, message_body: str) -> bool:
         """
-        Dispatches the standard review request template to a customer.
+        Sends a pre-rendered SMS message to the given phone number.
+        The caller is responsible for building the message body before calling this.
         Must return True on successful delivery acknowledgement, False otherwise.
         """
         pass

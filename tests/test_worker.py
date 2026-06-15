@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 from sqlmodel import Session, select
 
 from app.models.db_models import ClientCampaign, Tenant
+from app.models.db_models import DEFAULT_MESSAGE_TEMPLATE
 from app.worker import process_pending_campaigns
 
 pytestmark = pytest.mark.asyncio
@@ -24,6 +25,15 @@ def _make_campaign(tenant: Tenant, job_id: str, status: str = "pending") -> Clie
         provider="jobber",
         job_id=job_id,
         delivery_status=status,
+    )
+
+
+def _expected_body(tenant: Tenant, customer_name: str) -> str:
+    """Build the message body the worker will render for this tenant + customer."""
+    return tenant.message_template.format(
+        customer_name=customer_name,
+        business_name=tenant.business_name,
+        review_url=tenant.review_url,
     )
 
 
@@ -49,8 +59,7 @@ async def test_worker_sends_pending_rows_and_marks_sent(
 
     adapter.send_review_request.assert_called_once_with(
         phone=campaign.customer_phone,
-        customer_name=campaign.customer_name,
-        review_url=test_tenant.review_url,
+        message_body=_expected_body(test_tenant, campaign.customer_name),
     )
 
 
@@ -120,7 +129,7 @@ async def test_worker_continues_after_per_row_exception(
 
     call_count = 0
 
-    async def flaky_send(phone, customer_name, review_url):
+    async def flaky_send(phone, message_body):
         nonlocal call_count
         call_count += 1
         if call_count == 1:

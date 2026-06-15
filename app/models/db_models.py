@@ -20,6 +20,16 @@ import uuid
 from sqlmodel import Field, Relationship, SQLModel
 from sqlalchemy import UniqueConstraint
 
+# The default SMS message every new tenant starts with.
+# Supports three placeholders: {customer_name}, {business_name}, {review_url}.
+# Tenants can override this with a custom template via manage.py.
+DEFAULT_MESSAGE_TEMPLATE = (
+    "Hi {customer_name}, thank you for choosing {business_name}! "
+    "We'd love your feedback — please leave us a Google review here: {review_url} "
+    "Reply STOP to opt out."
+)
+
+
 def get_utc_now() -> datetime:
     """Helper to ensure all database entries use a standardized timezone-aware UTC format."""
     return datetime.now(timezone.utc)
@@ -35,6 +45,7 @@ class Tenant(SQLModel, table=True):
     business_name: str = Field(index=True)
     api_key: str = Field(unique=True, index=True)
     review_url: str
+    message_template: str = Field(default=DEFAULT_MESSAGE_TEMPLATE)
     is_active: bool = Field(default=True)
     created_at: datetime = Field(default_factory=get_utc_now)
 

@@ -5,9 +5,12 @@ NOTES:
 2. The "provision" command creates a new roofing company (Tenant) in the database and
    generates a secure random API key for them automatically. You copy that key and give
    it to the CRM so it can send webhooks.
-3. The "list-tenants" command shows every company already in the database so you can
+3. The "update-tenant" command lets you change a tenant's review URL or message template
+   later without having to delete and recreate them from scratch. Look them up by API
+   key or business name.
+4. The "list-tenants" command shows every company already in the database so you can
    check what's been set up without opening a DB browser.
-4. Run this script from the project root using the venv Python so all the app imports
+5. Run this script from the project root using the venv Python so all the app imports
    resolve correctly: .venv\\Scripts\\python.exe manage.py <command>
 """
 
@@ -19,13 +22,50 @@ from datetime import timezone
 from sqlmodel import Session, select
 
 from app.core.db import create_db_and_tables, engine
-from app.models.db_models import Tenant
+from app.models.db_models import DEFAULT_MESSAGE_TEMPLATE, Tenant
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
-def _divider():
+def _divider() -> None:
     print("=" * 62)
+
+
+def _find_tenant(session: Session, api_key: str | None, business_name: str | None) -> Tenant | None:
+    """Look up a tenant by api_key or business_name."""
+    if api_key:
+        return session.exec(select(Tenant).where(Tenant.api_key == api_key)).first()
+    return session.exec(select(Tenant).where(Tenant.business_name == business_name)).first()
+
+
+def _print_tenant(tenant: Tenant) -> None:
+    _divider()
+    print(f" Business  : {tenant.business_name}")
+    print(f" ID        : {tenant.id}")
+    print(f" API Key   : {tenant.api_key}")
+    print(f" Review    : {tenant.review_url}")
+    print(f" Template  : {tenant.message_template}")
+    print(f" Active    : {tenant.is_active}")
+    _divider()
+
+
+# ── core logic (session-injectable so tests can use them directly) ────────────
+
+def do_update_tenant(
+    session: Session,
+    tenant: Tenant,
+    review_url: str | None = None,
+    message_template: str | None = None,
+) -> Tenant:
+    """Apply field updates to a Tenant and commit. Returns the refreshed tenant."""
+    if review_url is not None:
+        tenant.review_url = review_url
+    if message_template is not None:
+        tenant.message_template = message_template
+    session.add(tenant)
+    session.commit()
+    session.refresh(tenant)
+    return tenant
 
 
 # ── subcommands ───────────────────────────────────────────────────────────────
@@ -40,6 +80,7 @@ def cmd_provision(args: argparse.Namespace) -> None:
         business_name=args.business_name,
         api_key=api_key,
         review_url=args.review_url,
+        message_template=args.message_template or DEFAULT_MESSAGE_TEMPLATE,
     )
 
     with Session(engine) as session:
@@ -47,18 +88,39 @@ def cmd_provision(args: argparse.Namespace) -> None:
         session.commit()
         session.refresh(tenant)
 
-        _divider()
+        print()
         print(" TENANT PROVISIONED")
-        _divider()
-        print(f" Business : {tenant.business_name}")
-        print(f" ID       : {tenant.id}")
-        print(f" API Key  : {tenant.api_key}")
-        print(f" Review   : {tenant.review_url}")
-        print(f" Active   : {tenant.is_active}")
-        _divider()
+        _print_tenant(tenant)
         print(" Copy the API Key above — it will not be shown again.")
         print(" Pass it as X-Api-Key in every webhook and opt-out request.")
         _divider()
+        print()
+
+
+def cmd_update_tenant(args: argparse.Namespace) -> None:
+    """Update review_url and/or message_template for an existing Tenant."""
+    if not args.review_url and not args.message_template:
+        print("ERROR: Provide at least one of --review-url or --message-template.")
+        sys.exit(1)
+
+    with Session(engine) as session:
+        tenant = _find_tenant(session, args.api_key, args.business_name)
+
+        if not tenant:
+            lookup = f"api_key={args.api_key}" if args.api_key else f"business_name={args.business_name}"
+            print(f"ERROR: No tenant found with {lookup}")
+            sys.exit(1)
+
+        tenant = do_update_tenant(
+            session,
+            tenant,
+            review_url=args.review_url,
+            message_template=args.message_template,
+        )
+
+        print()
+        print(" TENANT UPDATED")
+        _print_tenant(tenant)
         print()
 
 
@@ -78,10 +140,11 @@ def cmd_list_tenants(_args: argparse.Namespace) -> None:
             created = t.created_at.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             status  = "active" if t.is_active else "INACTIVE"
             print(f" [{status}] {t.business_name}")
-            print(f"   ID      : {t.id}")
-            print(f"   API Key : {t.api_key}")
-            print(f"   Review  : {t.review_url}")
-            print(f"   Created : {created}")
+            print(f"   ID       : {t.id}")
+            print(f"   API Key  : {t.api_key}")
+            print(f"   Review   : {t.review_url}")
+            print(f"   Template : {t.message_template}")
+            print(f"   Created  : {created}")
             print()
 
     _divider()
@@ -114,6 +177,44 @@ def main() -> None:
         metavar="URL",
         help='Google review link, e.g. "https://g.page/rutherford-roofing/review"',
     )
+    provision_parser.add_argument(
+        "--message-template",
+        default=None,
+        metavar="TEMPLATE",
+        help=(
+            'Optional custom SMS template. Use {customer_name}, {business_name}, '
+            'and {review_url} as placeholders. Defaults to the standard CrewSignal template.'
+        ),
+    )
+
+    # update-tenant
+    update_parser = subparsers.add_parser(
+        "update-tenant",
+        help="Update review_url or message_template for an existing Tenant",
+    )
+    lookup_group = update_parser.add_mutually_exclusive_group(required=True)
+    lookup_group.add_argument(
+        "--api-key",
+        metavar="KEY",
+        help="Find the tenant by their API key",
+    )
+    lookup_group.add_argument(
+        "--business-name",
+        metavar="NAME",
+        help="Find the tenant by their business name",
+    )
+    update_parser.add_argument(
+        "--review-url",
+        default=None,
+        metavar="URL",
+        help="New Google review URL",
+    )
+    update_parser.add_argument(
+        "--message-template",
+        default=None,
+        metavar="TEMPLATE",
+        help="New SMS message template (use {customer_name}, {business_name}, {review_url})",
+    )
 
     # list-tenants
     subparsers.add_parser(
@@ -125,6 +226,8 @@ def main() -> None:
 
     if args.command == "provision":
         cmd_provision(args)
+    elif args.command == "update-tenant":
+        cmd_update_tenant(args)
     elif args.command == "list-tenants":
         cmd_list_tenants(args)
     else:

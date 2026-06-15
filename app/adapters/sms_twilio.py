@@ -44,12 +44,7 @@ class TwilioSMSAdapter(BaseSMSAdapter):
             to=to,
         )
 
-    async def send_review_request(self, phone: str, customer_name: str, review_url: str) -> bool:
-        message_body = (
-            f"Hi {customer_name}, thanks for choosing us! "
-            f"If you have a minute, we'd love a quick review of our work: {review_url} "
-            f"Reply STOP to opt out."
-        )
+    async def send_review_request(self, phone: str, message_body: str) -> bool:
         try:
             self._send(phone, message_body)
             return True
