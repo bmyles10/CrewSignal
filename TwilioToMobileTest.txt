@@ -1,0 +1,12 @@
+$headers = @{
+    "Content-Type" = "application/json"
+    "X-Api-Key" = "iaVxS15xbJrVUBsBn9VDeXWqd6qbzAz75-ZRIKIzAbg"
+}
+
+$body = @{
+    job_id = "test-job-007"
+    customer_name = "Nora"
+    customer_phone = "+19315606214"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Uri "http://localhost:8000/api/v1/webhooks/job-completed" -Method POST -Headers $headers -Body $body

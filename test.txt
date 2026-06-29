@@ -1,4 +1,0 @@
-.\.venv\Scripts\python.exe sandbox_test.py `
-  --api-key "3m9yHaaF7LNBEfXSkjERNLGvIfH_SQvYTBaXBThPp2c" `
-  --phone "+16157963530" `
-  --name "Brandon Myles"

@@ -70,16 +70,29 @@ def do_update_tenant(
 
 # ── subcommands ───────────────────────────────────────────────────────────────
 
+def _resolve_review_url(review_url: str | None, place_id: str | None) -> str:
+    """Return a review URL. Place ID takes precedence and generates the direct writereview link."""
+    if place_id:
+        return f"https://search.google.com/local/writereview?placeid={place_id}"
+    if review_url:
+        return review_url
+    raise ValueError("Provide either --review-url or --place-id.")
+
+
 def cmd_provision(args: argparse.Namespace) -> None:
     """Create a new Tenant and print its generated API key."""
     create_db_and_tables()
 
     api_key = secrets.token_urlsafe(32)
+    review_url = _resolve_review_url(
+        getattr(args, "review_url", None),
+        getattr(args, "place_id", None),
+    )
 
     tenant = Tenant(
         business_name=args.business_name,
         api_key=api_key,
-        review_url=args.review_url,
+        review_url=review_url,
         message_template=args.message_template or DEFAULT_MESSAGE_TEMPLATE,
     )
 
@@ -99,8 +112,11 @@ def cmd_provision(args: argparse.Namespace) -> None:
 
 def cmd_update_tenant(args: argparse.Namespace) -> None:
     """Update review_url and/or message_template for an existing Tenant."""
-    if not args.review_url and not args.message_template:
-        print("ERROR: Provide at least one of --review-url or --message-template.")
+    place_id = getattr(args, "place_id", None)
+    review_url = _resolve_review_url(getattr(args, "review_url", None), place_id) if (args.review_url or place_id) else None
+
+    if not review_url and not args.message_template:
+        print("ERROR: Provide at least one of --review-url, --place-id, or --message-template.")
         sys.exit(1)
 
     with Session(engine) as session:
@@ -114,7 +130,7 @@ def cmd_update_tenant(args: argparse.Namespace) -> None:
         tenant = do_update_tenant(
             session,
             tenant,
-            review_url=args.review_url,
+            review_url=review_url,
             message_template=args.message_template,
         )
 
@@ -171,11 +187,16 @@ def main() -> None:
         metavar="NAME",
         help='e.g. "Rutherford Roofing"',
     )
-    provision_parser.add_argument(
+    review_group = provision_parser.add_mutually_exclusive_group(required=True)
+    review_group.add_argument(
         "--review-url",
-        required=True,
         metavar="URL",
-        help='Google review link, e.g. "https://g.page/rutherford-roofing/review"',
+        help='Full Google review URL, e.g. "https://search.google.com/local/writereview?placeid=..."',
+    )
+    review_group.add_argument(
+        "--place-id",
+        metavar="PLACE_ID",
+        help='Google Place ID (e.g. ChIJxxxxxxx). Generates the direct writereview URL automatically.',
     )
     provision_parser.add_argument(
         "--message-template",
@@ -207,7 +228,13 @@ def main() -> None:
         "--review-url",
         default=None,
         metavar="URL",
-        help="New Google review URL",
+        help="New full Google review URL",
+    )
+    update_parser.add_argument(
+        "--place-id",
+        default=None,
+        metavar="PLACE_ID",
+        help="New Google Place ID — generates the direct writereview URL automatically",
     )
     update_parser.add_argument(
         "--message-template",
