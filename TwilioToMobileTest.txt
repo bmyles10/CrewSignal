@@ -4,9 +4,9 @@ $headers = @{
 }
 
 $body = @{
-    job_id = "test-job-007"
-    customer_name = "Nora"
-    customer_phone = "+19315606214"
+    job_id = "test-job-008"
+    customer_name = "Brandon"
+    customer_phone = "+16157963530"
 } | ConvertTo-Json
 
-Invoke-RestMethod -Uri "http://localhost:8000/api/v1/webhooks/job-completed" -Method POST -Headers $headers -Body $body
+Invoke-RestMethod -Uri "https://licorice-elope-untainted.ngrok-free.dev/api/v1/webhooks/job-completed" -Method POST -Headers $headers -Body $body

@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     # Set False only in production with real Twilio credentials; always True in tests
     USE_MOCK_SMS: bool = True
 
+    # Failure alerting — email sent when a send fails or the worker crashes
+    ALERTS_ENABLED: bool = False
+    ALERT_EMAIL_FROM: str = ""
+    ALERT_EMAIL_PASSWORD: str = ""
+    ALERT_EMAIL_TO: str = ""
+
     # Pydantic V2 Configuration for reading the .env file safely
     model_config = SettingsConfigDict(
         env_file=".env", 

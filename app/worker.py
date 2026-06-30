@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from sqlmodel import Session, select
 
 from app.adapters.sms_base import BaseSMSAdapter
+from app.core.alerts import send_alert
 from app.core.config import settings
 from app.core.db import engine
 from app.models.db_models import ClientCampaign, OptOut, Tenant
@@ -107,6 +108,18 @@ async def process_pending_campaigns(
             session.add(campaign)
             session.commit()
 
+            if not success:
+                send_alert(
+                    subject=f"SMS send failed — campaign {campaign.id}",
+                    body=(
+                        f"Campaign ID : {campaign.id}\n"
+                        f"Tenant ID   : {campaign.tenant_id}\n"
+                        f"Customer    : {campaign.customer_name} ({campaign.customer_phone})\n"
+                        f"Job ID      : {campaign.job_id}\n"
+                        f"Retry count : {campaign.retry_count}\n"
+                    ),
+                )
+
         except Exception as exc:
             print(f"[WORKER] Error processing campaign {campaign.id}: {exc}")
 
@@ -120,4 +133,8 @@ async def worker_loop() -> None:
                 await process_pending_campaigns(session)
         except Exception as exc:
             print(f"[WORKER] Unexpected error in poll cycle: {exc}")
+            send_alert(
+                subject="Worker loop crashed",
+                body=f"The CrewSignal worker loop hit an unexpected error:\n\n{exc}",
+            )
         await asyncio.sleep(POLL_INTERVAL_SECONDS)
