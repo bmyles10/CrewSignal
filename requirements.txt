@@ -13,6 +13,7 @@ pydantic[email]>=2.11.0
 # Third-Party Integrations
 twilio>=9.1.0
 tenacity>=8.5.0
+python-multipart>=0.0.9
 
 # Testing & Dev Utility
 pytest>=8.3.2

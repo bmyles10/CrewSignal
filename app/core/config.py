@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     ALERT_EMAIL_PASSWORD: str = ""
     ALERT_EMAIL_TO: str = ""
 
+    # Public base URL Twilio uses to reach this server (e.g. your ngrok URL).
+    # Required to validate inbound Twilio webhook signatures.
+    PUBLIC_BASE_URL: str = ""
+
     # Pydantic V2 Configuration for reading the .env file safely
     model_config = SettingsConfigDict(
         env_file=".env", 

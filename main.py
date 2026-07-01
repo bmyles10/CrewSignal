@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.core.db import create_db_and_tables
 from app.worker import worker_loop
 
-from app.api.v1 import optout, webhooks
+from app.api.v1 import inbound, optout, webhooks
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -52,6 +52,7 @@ app.add_middleware(
 
 app.include_router(webhooks.router, prefix=f"{settings.API_V1_STR}/webhooks", tags=["Webhooks"])
 app.include_router(optout.router, prefix=f"{settings.API_V1_STR}", tags=["Opt-Out"])
+app.include_router(inbound.router, prefix=f"{settings.API_V1_STR}", tags=["Inbound SMS"])
 
 @app.get("/health", tags=["Health"])
 async def health_check():
